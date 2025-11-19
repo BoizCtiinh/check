@@ -1,8 +1,9 @@
--- Blox Fruits Elite Hunter V2 - Final Version
+-- Blox Fruits Elite Hunter V2 - Complete Version
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
@@ -10,11 +11,10 @@ print("========================================")
 print("Elite Hunter V2 - Initializing...")
 print("========================================")
 
--- STEP 1: CHOOSE TEAM FIRST
+-- STEP 1: CHOOSE TEAM
 print("[1/3] Choosing team...")
 
 local function ChooseTeam()
-    -- Method 1: RemoteFunction (fastest)
     local success1 = pcall(function()
         local remotes = ReplicatedStorage:FindFirstChild("Remotes")
         if remotes then
@@ -35,7 +35,6 @@ local function ChooseTeam()
         end
     end
     
-    -- Method 2: UI Click (backup)
     print("Trying UI method...")
     local attempts = 0
     repeat
@@ -51,7 +50,6 @@ local function ChooseTeam()
                     if container then
                         local pirates = container:FindFirstChild("Pirates")
                         if pirates then
-                            -- Find and click button
                             for _, child in pairs(pirates:GetDescendants()) do
                                 if child:IsA("TextButton") then
                                     for _, connection in pairs(getconnections(child.Activated)) do
@@ -73,73 +71,173 @@ local function ChooseTeam()
         print("✓ Team selected: " .. tostring(Player.Team))
         return true
     else
-        warn("⚠ Could not select team after " .. attempts .. " attempts")
+        warn("⚠ Could not select team")
         return false
     end
 end
 
--- Execute team selection
 ChooseTeam()
 task.wait(1)
 
--- STEP 2: LOAD/SAVE CONFIG
+-- STEP 2: LOAD CONFIG
 print("[2/3] Loading configuration...")
 
--- Config file path
 local CONFIG_FILE = "elite_hunter_config.json"
 
--- Load config from file
 local function loadConfig()
     local success, result = pcall(function()
         if readfile and isfile and isfile(CONFIG_FILE) then
             local content = readfile(CONFIG_FILE)
-            local config = HttpService:JSONDecode(content)
-            print("✓ Config loaded from file")
-            return config
+            return HttpService:JSONDecode(content)
         end
     end)
     
     if success and result then
+        print("✓ Config loaded")
         return result
     end
     
-    -- Default config
-    print("✓ Using default config")
     return {
-        autoHop = false
+        autoHop = false,
+        autoFarm = false
     }
 end
 
--- Save config to file
 local function saveConfig(config)
     pcall(function()
         if writefile then
             local json = HttpService:JSONEncode(config)
             writefile(CONFIG_FILE, json)
-            print("✓ Config saved to: " .. CONFIG_FILE)
-        else
-            warn("⚠ writefile not supported by executor")
+            print("✓ Config saved")
         end
     end)
 end
 
--- Load initial config
 local savedConfig = loadConfig()
 
 -- CONFIG
 local AUTO_HOP_ENABLED = savedConfig.autoHop
+local AUTO_FARM_ENABLED = savedConfig.autoFarm
 local CHECK_INTERVAL = 5
 local HOP_DELAY = 3
+_G.SelectWeapon = _G.SelectWeapon or "Combat" -- Default weapon is Melee
+
+-- FAST ATTACK SETUP
+_G.FastAttack = true
+
+if _G.FastAttack then
+    local _ENV = (getgenv or getrenv or getfenv)()
+
+    local function SafeWaitForChild(parent, childName)
+        local success, result = pcall(function()
+            return parent:WaitForChild(childName)
+        end)
+        if not success or not result then
+            warn("Failed to find: " .. childName)
+        end
+        return result
+    end
+
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    local CollectionService = game:GetService("CollectionService")
+    local RunService = game:GetService("RunService")
+    
+    local Remotes = SafeWaitForChild(ReplicatedStorage, "Remotes")
+    if Remotes then
+        local Validator = SafeWaitForChild(Remotes, "Validator")
+        local CommE = SafeWaitForChild(Remotes, "CommE")
+        
+        local WorldOrigin = SafeWaitForChild(workspace, "_WorldOrigin")
+        local Characters = SafeWaitForChild(workspace, "Characters")
+        local Enemies = SafeWaitForChild(workspace, "Enemies")
+        
+        local Modules = SafeWaitForChild(ReplicatedStorage, "Modules")
+        local Net = SafeWaitForChild(Modules, "Net")
+        
+        local Settings = {
+            AutoClick = true,
+            ClickDelay = 0.00001
+        }
+        
+        local FastAttack = {
+            Distance = 100,
+            attackMobs = true,
+            attackPlayers = true
+        }
+        
+        local RegisterAttack = SafeWaitForChild(Net, "RE/RegisterAttack")
+        local RegisterHit = SafeWaitForChild(Net, "RE/RegisterHit")
+        
+        local function IsAlive(character)
+            return character and character:FindFirstChild("Humanoid") and character.Humanoid.Health > 0
+        end
+        
+        local function ProcessEnemies(OthersEnemies, Folder)
+            local BasePart = nil
+            for _, Enemy in Folder:GetChildren() do
+                local Head = Enemy:FindFirstChild("Head")
+                if Head and IsAlive(Enemy) and Player:DistanceFromCharacter(Head.Position) < FastAttack.Distance then
+                    if Enemy ~= Player.Character then
+                        table.insert(OthersEnemies, { Enemy, Head })
+                        BasePart = Head
+                    end
+                end
+            end
+            return BasePart
+        end
+        
+        function FastAttack:Attack(BasePart, OthersEnemies)
+            if not BasePart or #OthersEnemies == 0 then return end
+            if RegisterAttack then
+                RegisterAttack:FireServer(Settings.ClickDelay or 0)
+            end
+            if RegisterHit then
+                RegisterHit:FireServer(BasePart, OthersEnemies)
+            end
+        end
+        
+        function FastAttack:AttackNearest()
+            local OthersEnemies = {}
+            local Part1 = ProcessEnemies(OthersEnemies, Enemies)
+            local Part2 = ProcessEnemies(OthersEnemies, Characters)
+            if #OthersEnemies > 0 then
+                self:Attack(Part1 or Part2, OthersEnemies)
+            else
+                task.wait(0)
+            end
+        end
+        
+        function FastAttack:BladeHits()
+            local Equipped = IsAlive(Player.Character) and Player.Character:FindFirstChildOfClass("Tool")
+            if Equipped and Equipped.ToolTip ~= "Gun" then
+                self:AttackNearest()
+            else
+                task.wait(0)
+            end
+        end
+        
+        task.spawn(function()
+            while task.wait(Settings.ClickDelay) do
+                if Settings.AutoClick and AUTO_FARM_ENABLED then
+                    FastAttack:BladeHits()
+                end
+            end
+        end)
+        
+        _ENV.rz_FastAttack = FastAttack
+        print("✓ Fast Attack enabled")
+    end
+end
 
 -- STATE
 local isHopping = false
 local lastCheckTime = 0
+local scriptStartTime = tick()
+local INITIAL_WAIT_TIME = 5
 
--- Remove old UI if exists
+-- Remove old UI
 local oldUI = PlayerGui:FindFirstChild("EliteHunterV2Gui")
-if oldUI then
-    oldUI:Destroy()
-end
+if oldUI then oldUI:Destroy() end
 
 -- STEP 3: CREATE UI
 print("[3/3] Creating UI...")
@@ -152,40 +250,31 @@ local function getCommF()
     return rem:FindFirstChild("CommF_")
 end
 
--- Get Elite Hunter progress
 local function GetEliteProgress()
     local progress = 0
-    
     pcall(function()
         local comm = getCommF()
         if comm then
             local result = comm:InvokeServer("EliteHunter", "Progress")
-            
             if result then
                 if type(result) == "string" then
                     local num = string.match(result, "defeated (%d+) elite")
-                    if num then
-                        progress = tonumber(num) or 0
-                    end
+                    if num then progress = tonumber(num) or 0 end
                 elseif type(result) == "number" then
                     progress = result
                 end
             end
         end
     end)
-    
     return progress
 end
 
--- Check if Elite Quest is available
 local function HasEliteQuest()
     local hasQuest = false
-    
     pcall(function()
         local comm = getCommF()
         if comm then
             local result = comm:InvokeServer("EliteHunter")
-            
             if result and type(result) == "string" then
                 local msg = string.lower(result)
                 if string.find(msg, "don't have anything") or string.find(msg, "come back later") then
@@ -198,18 +287,31 @@ local function HasEliteQuest()
             end
         end
     end)
-    
     return hasQuest
 end
 
--- Server Hop Function
+-- Check if Elite is spawned
+local function IsEliteSpawned()
+    local eliteNames = {"Diablo", "Deandre", "Urban"}
+    
+    for _, name in pairs(eliteNames) do
+        if ReplicatedStorage:FindFirstChild(name) then
+            return true, name
+        end
+        if workspace.Enemies:FindFirstChild(name) then
+            return true, name
+        end
+    end
+    return false, nil
+end
+
 local function ServerHop()
     if isHopping then return end
     isHopping = true
     
     print("[Elite Hunter V2] Starting server hop...")
     
-    local success, result = pcall(function()
+    local success = pcall(function()
         local servers = {}
         local req = syn and syn.request or http and http.request or http_request or request
         
@@ -221,7 +323,6 @@ local function ServerHop()
             
             if response and response.Body then
                 local data = HttpService:JSONDecode(response.Body)
-                
                 if data and data.data then
                     for _, server in pairs(data.data) do
                         if server.playing < server.maxPlayers and server.id ~= game.JobId then
@@ -234,16 +335,13 @@ local function ServerHop()
         
         if #servers > 0 then
             local randomServer = servers[math.random(1, #servers)]
-            print("[Elite Hunter V2] Teleporting to server: " .. randomServer)
             TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServer, Player)
         else
-            print("[Elite Hunter V2] No servers found, using fallback")
             TeleportService:Teleport(game.PlaceId, Player)
         end
     end)
     
     if not success then
-        warn("[Elite Hunter V2] Hop failed: " .. tostring(result))
         pcall(function()
             TeleportService:Teleport(game.PlaceId, Player)
         end)
@@ -253,6 +351,42 @@ local function ServerHop()
     isHopping = false
 end
 
+-- Teleport function
+local function TP(cframe)
+    if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+        Player.Character.HumanoidRootPart.CFrame = cframe
+    end
+end
+
+-- Equip weapon
+local function EquipWeapon(weaponName)
+    pcall(function()
+        -- Try to find weapon in backpack or character
+        local tool = Player.Backpack:FindFirstChild(weaponName) or Player.Character:FindFirstChild(weaponName)
+        
+        -- If weapon not found, try to equip Combat (melee)
+        if not tool then
+            tool = Player.Backpack:FindFirstChild("Combat") or Player.Character:FindFirstChild("Combat")
+        end
+        
+        if tool and tool.Parent == Player.Backpack then
+            Player.Character.Humanoid:EquipTool(tool)
+        end
+    end)
+end
+
+-- Auto Haki
+local function AutoHaki()
+    pcall(function()
+        if not Player.Character:FindFirstChild("HasBuso") then
+            local comm = getCommF()
+            if comm then
+                comm:InvokeServer("Buso")
+            end
+        end
+    end)
+end
+
 -- CREATE UI
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "EliteHunterV2Gui"
@@ -260,10 +394,8 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = PlayerGui
 
--- Main Frame
 local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 520, 0, 110)
+MainFrame.Size = UDim2.new(0, 520, 0, 140)
 MainFrame.AnchorPoint = Vector2.new(0.5, 0)
 MainFrame.Position = UDim2.new(0.5, 0, 0, 15)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
@@ -274,11 +406,9 @@ local UICorner = Instance.new("UICorner")
 UICorner.CornerRadius = UDim.new(0, 12)
 UICorner.Parent = MainFrame
 
--- Rainbow border
 local UIStroke = Instance.new("UIStroke")
 UIStroke.Color = Color3.fromRGB(255, 0, 0)
 UIStroke.Thickness = 3
-UIStroke.Transparency = 0
 UIStroke.Parent = MainFrame
 
 spawn(function()
@@ -290,29 +420,24 @@ spawn(function()
     end
 end)
 
--- Content Frame
 local ContentFrame = Instance.new("Frame")
 ContentFrame.Size = UDim2.new(1, -20, 1, -20)
 ContentFrame.Position = UDim2.new(0, 10, 0, 10)
 ContentFrame.BackgroundTransparency = 1
 ContentFrame.Parent = MainFrame
 
--- Title
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Name = "Title"
 TitleLabel.Size = UDim2.new(1, -20, 0, 25)
 TitleLabel.Position = UDim2.new(0, 10, 0, 5)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.TextSize = 18
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleLabel.Text = "Elite Hunter V2 - Player: " .. Player.Name
+TitleLabel.Text = "Elite Hunter V2 - " .. Player.Name
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 TitleLabel.Parent = ContentFrame
 
--- Progress Label
 local ProgressLabel = Instance.new("TextLabel")
-ProgressLabel.Name = "Progress"
 ProgressLabel.Size = UDim2.new(0.48, -10, 0, 22)
 ProgressLabel.Position = UDim2.new(0, 10, 0, 35)
 ProgressLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
@@ -320,7 +445,7 @@ ProgressLabel.BorderSizePixel = 0
 ProgressLabel.Font = Enum.Font.GothamBold
 ProgressLabel.TextSize = 15
 ProgressLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
-ProgressLabel.Text = "Elite Quests: ..."
+ProgressLabel.Text = "Elite Kills: ..."
 ProgressLabel.TextXAlignment = Enum.TextXAlignment.Center
 ProgressLabel.Parent = ContentFrame
 
@@ -328,9 +453,7 @@ local ProgressCorner = Instance.new("UICorner")
 ProgressCorner.CornerRadius = UDim.new(0, 6)
 ProgressCorner.Parent = ProgressLabel
 
--- Status Label
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = "Status"
 StatusLabel.Size = UDim2.new(0.48, -10, 0, 22)
 StatusLabel.Position = UDim2.new(0.52, 0, 0, 35)
 StatusLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
@@ -346,139 +469,125 @@ local StatusCorner = Instance.new("UICorner")
 StatusCorner.CornerRadius = UDim.new(0, 6)
 StatusCorner.Parent = StatusLabel
 
--- Auto Hop Toggle Button
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = UDim2.new(0.48, -10, 0, 22)
-ToggleButton.Position = UDim2.new(0, 10, 0, 62)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
-ToggleButton.BorderSizePixel = 0
-ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.TextSize = 14
-ToggleButton.TextColor3 = Color3.fromRGB(255, 100, 100)
-ToggleButton.Text = "Auto Hop: OFF"
-ToggleButton.Parent = ContentFrame
+local EliteStatusLabel = Instance.new("TextLabel")
+EliteStatusLabel.Size = UDim2.new(1, -20, 0, 22)
+EliteStatusLabel.Position = UDim2.new(0, 10, 0, 62)
+EliteStatusLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+EliteStatusLabel.BorderSizePixel = 0
+EliteStatusLabel.Font = Enum.Font.GothamBold
+EliteStatusLabel.TextSize = 14
+EliteStatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+EliteStatusLabel.Text = "Elite: Checking..."
+EliteStatusLabel.TextXAlignment = Enum.TextXAlignment.Center
+EliteStatusLabel.Parent = ContentFrame
 
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(0, 6)
-ToggleCorner.Parent = ToggleButton
+local EliteStatusCorner = Instance.new("UICorner")
+EliteStatusCorner.CornerRadius = UDim.new(0, 6)
+EliteStatusCorner.Parent = EliteStatusLabel
 
--- Manual Hop Button
-local HopButton = Instance.new("TextButton")
-HopButton.Name = "HopButton"
-HopButton.Size = UDim2.new(0.48, -10, 0, 22)
-HopButton.Position = UDim2.new(0.52, 0, 0, 62)
-HopButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
-HopButton.BorderSizePixel = 0
-HopButton.Font = Enum.Font.GothamBold
-HopButton.TextSize = 14
-HopButton.TextColor3 = Color3.fromRGB(100, 200, 255)
-HopButton.Text = "Hop Server Now"
-HopButton.Parent = ContentFrame
+local ToggleFarmButton = Instance.new("TextButton")
+ToggleFarmButton.Size = UDim2.new(0.48, -10, 0, 22)
+ToggleFarmButton.Position = UDim2.new(0, 10, 0, 89)
+ToggleFarmButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+ToggleFarmButton.BorderSizePixel = 0
+ToggleFarmButton.Font = Enum.Font.GothamBold
+ToggleFarmButton.TextSize = 14
+ToggleFarmButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+ToggleFarmButton.Text = "Auto Farm: OFF"
+ToggleFarmButton.Parent = ContentFrame
+
+local FarmCorner = Instance.new("UICorner")
+FarmCorner.CornerRadius = UDim.new(0, 6)
+FarmCorner.Parent = ToggleFarmButton
+
+local ToggleHopButton = Instance.new("TextButton")
+ToggleHopButton.Size = UDim2.new(0.48, -10, 0, 22)
+ToggleHopButton.Position = UDim2.new(0.52, 0, 0, 89)
+ToggleHopButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+ToggleHopButton.BorderSizePixel = 0
+ToggleHopButton.Font = Enum.Font.GothamBold
+ToggleHopButton.TextSize = 14
+ToggleHopButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+ToggleHopButton.Text = "Auto Hop: OFF"
+ToggleHopButton.Parent = ContentFrame
 
 local HopCorner = Instance.new("UICorner")
 HopCorner.CornerRadius = UDim.new(0, 6)
-HopCorner.Parent = HopButton
+HopCorner.Parent = ToggleHopButton
 
--- Update button UI based on loaded config
-local function updateToggleButtonUI()
-    if AUTO_HOP_ENABLED then
-        ToggleButton.Text = "Auto Hop: ON"
-        ToggleButton.TextColor3 = Color3.fromRGB(100, 255, 100)
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
+local function updateButtonUI()
+    if AUTO_FARM_ENABLED then
+        ToggleFarmButton.Text = "Auto Farm: ON"
+        ToggleFarmButton.TextColor3 = Color3.fromRGB(100, 255, 100)
+        ToggleFarmButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
     else
-        ToggleButton.Text = "Auto Hop: OFF"
-        ToggleButton.TextColor3 = Color3.fromRGB(255, 100, 100)
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+        ToggleFarmButton.Text = "Auto Farm: OFF"
+        ToggleFarmButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+        ToggleFarmButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+    end
+    
+    if AUTO_HOP_ENABLED then
+        ToggleHopButton.Text = "Auto Hop: ON"
+        ToggleHopButton.TextColor3 = Color3.fromRGB(100, 255, 100)
+        ToggleHopButton.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
+    else
+        ToggleHopButton.Text = "Auto Hop: OFF"
+        ToggleHopButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+        ToggleHopButton.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
     end
 end
 
--- Set initial button state
-updateToggleButtonUI()
+updateButtonUI()
 
--- Toggle Auto Hop
-ToggleButton.MouseButton1Click:Connect(function()
+ToggleFarmButton.MouseButton1Click:Connect(function()
+    AUTO_FARM_ENABLED = not AUTO_FARM_ENABLED
+    updateButtonUI()
+    saveConfig({autoHop = AUTO_HOP_ENABLED, autoFarm = AUTO_FARM_ENABLED})
+    print("[Elite Hunter V2] Auto Farm " .. (AUTO_FARM_ENABLED and "ON" or "OFF"))
+end)
+
+ToggleHopButton.MouseButton1Click:Connect(function()
     AUTO_HOP_ENABLED = not AUTO_HOP_ENABLED
-    
-    updateToggleButtonUI()
-    
-    -- Save config
-    saveConfig({
-        autoHop = AUTO_HOP_ENABLED
-    })
-    
-    print("[Elite Hunter V2] Auto Hop " .. (AUTO_HOP_ENABLED and "ENABLED" or "DISABLED"))
+    updateButtonUI()
+    saveConfig({autoHop = AUTO_HOP_ENABLED, autoFarm = AUTO_FARM_ENABLED})
+    print("[Elite Hunter V2] Auto Hop " .. (AUTO_HOP_ENABLED and "ON" or "OFF"))
 end)
 
--- Manual Hop Button
-HopButton.MouseButton1Click:Connect(function()
-    if not isHopping then
-        StatusLabel.Text = "Status: Hopping..."
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-        print("[Elite Hunter V2] Manual server hop triggered")
-        task.wait(1)
-        ServerHop()
-    else
-        print("[Elite Hunter V2] Already hopping, please wait")
-    end
-end)
-
--- Update function
 local function updateEliteInfo()
-    local success, err = pcall(function()
+    pcall(function()
         local progress = GetEliteProgress()
-        ProgressLabel.Text = "Elite Quests: " .. tostring(progress)
+        ProgressLabel.Text = "Elite Kills: " .. tostring(progress)
         
         local hasQuest = HasEliteQuest()
+        local isSpawned, eliteName = IsEliteSpawned()
+        
+        if isSpawned then
+            EliteStatusLabel.Text = "Elite: ✅ " .. eliteName .. " Spawned"
+            EliteStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        else
+            EliteStatusLabel.Text = "Elite: ❌ Not Spawned"
+            EliteStatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        
+        local timeSinceStart = tick() - scriptStartTime
+        local isGameLoading = timeSinceStart < INITIAL_WAIT_TIME
         
         if hasQuest then
-            StatusLabel.Text = "Status: Quest Available"
+            StatusLabel.Text = "Status: Quest Active"
             StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
         else
+            if isGameLoading then
+                local waitTimeLeft = math.ceil(INITIAL_WAIT_TIME - timeSinceStart)
+                StatusLabel.Text = "Loading... (" .. waitTimeLeft .. "s)"
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+                return
+            end
+            
             StatusLabel.Text = "Status: No Quest"
             StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
             
-            -- Auto hop if enabled
             if AUTO_HOP_ENABLED and not isHopping then
                 local currentTime = tick()
                 if currentTime - lastCheckTime >= CHECK_INTERVAL then
                     lastCheckTime = currentTime
-                    print("[Elite Hunter V2] No quest found, hopping in " .. HOP_DELAY .. " seconds...")
-                    StatusLabel.Text = "Status: Hopping in " .. HOP_DELAY .. "s"
-                    StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-                    task.wait(HOP_DELAY)
-                    ServerHop()
-                end
-            end
-        end
-    end)
-    
-    if not success then
-        warn("[Elite Hunter V2] Update failed: " .. tostring(err))
-    end
-end
-
--- Initial update
-print("✓ UI Created")
-task.wait(2)
-updateEliteInfo()
-
--- Auto-update loop
-spawn(function()
-    while wait(CHECK_INTERVAL) do
-        if ScreenGui.Parent then
-            updateEliteInfo()
-        else
-            print("[Elite Hunter V2] UI removed, stopping")
-            break
-        end
-    end
-end)
-
--- Success message
-print("========================================")
-print("✓ Elite Hunter V2 Loaded Successfully!")
-print("✓ Team: " .. tostring(Player.Team))
-print("✓ Auto Hop: " .. (AUTO_HOP_ENABLED and "ON" or "OFF"))
-print("✓ Config File: " .. CONFIG_FILE)
-print("========================================")
+                    StatusLabel.Tex
